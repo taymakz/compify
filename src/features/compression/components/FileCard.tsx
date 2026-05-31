@@ -8,13 +8,13 @@ import { useCompression } from '../hooks/use-compression';
 
 const STATUS_BADGE: Record<
   FileItem['status'],
-  { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }
+  { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' | 'success' }
 > = {
   pending:     { label: 'Ready',       variant: 'secondary'   },
   analyzing:   { label: 'Analyzing…',  variant: 'outline'     },
   compressing: { label: 'Compressing', variant: 'default'     },
   paused:      { label: 'Paused',      variant: 'outline'     },
-  completed:   { label: 'Done',        variant: 'secondary'   },
+  completed:   { label: 'Done',        variant: 'success'   },
   error:       { label: 'Error',       variant: 'destructive' },
   cancelled:   { label: 'Cancelled',   variant: 'outline'     },
 };
@@ -48,10 +48,10 @@ export function FileCard({ file, isActive, onCompress, onPlay }: Props) {
         <Thumbnail file={file} onPlay={onPlay} />
 
         <div className="flex min-w-0 flex-1 flex-col gap-1">
-          <div className="flex items-start justify-between gap-2">
+          <div className="flex items-start gap-6">
             <p className="truncate text-sm font-medium leading-tight">{file.name}</p>
             <Badge variant={badge.variant} className="shrink-0 text-[10px]">
-              {badge.label}
+              {badge.label} 
             </Badge>
           </div>
 
