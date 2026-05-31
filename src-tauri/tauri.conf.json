@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "tauri-starter",
-  "version": "0.1.0",
-  "identifier": "com.taymaz.tauri-starter",
+  "productName": "Compify",
+  "version": "1.0.0",
+  "identifier": "com.taymaz.compify",
   "build": {
     "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:1420",
@@ -12,13 +12,21 @@
   "app": {
     "windows": [
       {
-        "title": "tauri-starter",
-        "width": 800,
-        "height": 600
+        "title": "Compify — Video Compressor",
+        "width": 1200,
+        "height": 780,
+        "minWidth": 900,
+        "minHeight": 600,
+        "resizable": true,
+        "center": true
       }
     ],
     "security": {
-      "csp": null
+      "csp": null,
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["**"]
+      }
     }
   },
   "bundle": {
