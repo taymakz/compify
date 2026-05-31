@@ -1,4 +1,11 @@
-export type PresetId = 'maximum' | 'balanced' | 'quality' | 'custom';
+export type PresetId = 'maximum' | 'balanced' | 'quality' | 'gaming' | 'education' | 'custom';
+
+export interface SavedPreset {
+  id: string;
+  name: string;
+  settings: Omit<CompressionSettings, 'preset'>;
+  createdAt: number;
+}
 export type VideoFormat = 'mp4' | 'mkv' | 'mov' | 'avi' | 'webm' | 'm4v';
 export type JobStatus =
   | 'pending'
@@ -106,6 +113,26 @@ export const PRESET_CONFIGS: Record<PresetId, Omit<CompressionSettings, 'preset'
     preset_speed: 'slow',
     resolution: null,
     fps: null,
+    audio_bitrate: 192,
+    output_format: 'mp4',
+  },
+  gaming: {
+    video_codec: 'libx264',
+    audio_codec: 'aac',
+    crf: 20,
+    preset_speed: 'fast',
+    resolution: null,
+    fps: 60,
+    audio_bitrate: 192,
+    output_format: 'mp4',
+  },
+  education: {
+    video_codec: 'libx264',
+    audio_codec: 'aac',
+    crf: 18,
+    preset_speed: 'slow',
+    resolution: null,
+    fps: 60,
     audio_bitrate: 192,
     output_format: 'mp4',
   },

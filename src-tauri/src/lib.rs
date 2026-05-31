@@ -140,16 +140,32 @@ async fn pick_video_files(app: tauri::AppHandle) -> Result<Vec<String>, String> 
         .collect())
 }
 
+#[tauri::command]
+async fn pick_directory(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let result = app
+        .dialog()
+        .file()
+        .blocking_pick_folder();
+    Ok(result
+        .and_then(|fp| fp.into_path().ok())
+        .map(|p| p.to_string_lossy().to_string()))
+}
+
 // ── Output path helper ───────────────────────────────────────────────────────
 
 #[tauri::command]
-fn get_output_path(input_path: String, suffix: String, format: String) -> String {
+fn get_output_path(input_path: String, suffix: String, format: String, output_dir: Option<String>) -> String {
     let path = std::path::Path::new(&input_path);
     let stem = path
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("output");
-    let parent = path.parent().unwrap_or(std::path::Path::new("."));
+    let parent = if let Some(dir) = output_dir {
+        std::path::PathBuf::from(dir)
+    } else {
+        path.parent().unwrap_or(std::path::Path::new(".")).to_path_buf()
+    };
     parent
         .join(format!("{}{}.{}", stem, suffix, format))
         .to_string_lossy()
@@ -278,6 +294,7 @@ pub fn run() {
             download_ffmpeg,
             get_video_info,
             pick_video_files,
+            pick_directory,
             get_output_path,
             start_compression,
             cancel_job,

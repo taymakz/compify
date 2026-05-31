@@ -2,6 +2,7 @@ import { useCallback, useRef } from 'react';
 import { invoke, Channel, convertFileSrc } from '@tauri-apps/api/core';
 import { useStore } from '../store';
 import { type CompressionResult, type ProgressData, type VideoInfo } from '../types';
+import { OUTPUT_DIR_KEY } from '../components/SetupWizard';
 
 interface CompressionEventPayload {
   event:
@@ -92,10 +93,12 @@ export function useCompression() {
         console.log(`[Compify] Auto-corrected output format to webm for codec ${codec}`);
       }
 
+      const outputDir = localStorage.getItem(OUTPUT_DIR_KEY) || null;
       const outputPath = await invoke<string>('get_output_path', {
         inputPath: file.path,
         suffix: '_compressed',
         format: outputFormat,
+        outputDir,
       });
 
       dispatch({ type: 'SET_FILE_STATUS', id: fileId, status: 'compressing' });

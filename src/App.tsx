@@ -13,9 +13,11 @@ import { CompressionQueue } from '@/features/compression/components/CompressionQ
 import { PresetSelector } from '@/features/compression/components/PresetSelector';
 import { CustomSettings } from '@/features/compression/components/CustomSettings';
 import { FormatConverter } from '@/features/compression/components/FormatConverter';
+import { SetupWizard, SETUP_DONE_KEY } from '@/features/compression/components/SetupWizard';
 
 export default function App() {
   const [dark, setDark] = useState(true);
+  const [setupDone, setSetupDone] = useState(() => !!localStorage.getItem(SETUP_DONE_KEY));
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', dark);
@@ -24,7 +26,26 @@ export default function App() {
   return (
     <CompressionProvider>
       <div className={dark ? 'dark' : ''}>
-        <AppShell dark={dark} toggleDark={() => setDark((d) => !d)} />
+        <AnimatePresence mode="wait">
+          {!setupDone ? (
+            <motion.div
+              key="wizard"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+            >
+              <SetupWizard onComplete={() => setSetupDone(true)} />
+            </motion.div>
+          ) : (
+            <motion.div
+              key="app"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+            >
+              <AppShell dark={dark} toggleDark={() => setDark((d) => !d)} />
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </CompressionProvider>
   );

@@ -14,8 +14,25 @@ import {
   type FileItem,
   type PresetId,
   type ProgressData,
+  type SavedPreset,
   type VideoInfo,
 } from './types';
+
+const PRESETS_STORAGE_KEY = 'compify_presets';
+
+function loadSavedPresets(): SavedPreset[] {
+  try {
+    return JSON.parse(localStorage.getItem(PRESETS_STORAGE_KEY) ?? '[]');
+  } catch {
+    return [];
+  }
+}
+
+function persistSavedPresets(presets: SavedPreset[]) {
+  try {
+    localStorage.setItem(PRESETS_STORAGE_KEY, JSON.stringify(presets));
+  } catch {}
+}
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
@@ -26,6 +43,7 @@ interface State {
   installPhase: string;
   files: FileItem[];
   settings: CompressionSettings;
+  savedPresets: SavedPreset[];
   isProcessingQueue: boolean;
   activeJobId: string | null;
 }
@@ -37,6 +55,7 @@ const initial: State = {
   installPhase: '',
   files: [],
   settings: DEFAULT_SETTINGS,
+  savedPresets: loadSavedPresets(),
   isProcessingQueue: false,
   activeJobId: null,
 };
@@ -56,7 +75,9 @@ type Action =
   | { type: 'SET_FILE_RESULT'; id: string; result: CompressionResult }
   | { type: 'SET_SETTINGS'; payload: Partial<CompressionSettings> }
   | { type: 'SET_PRESET'; preset: PresetId }
-  | { type: 'SET_PROCESSING'; active: boolean; jobId?: string | null };
+  | { type: 'SET_PROCESSING'; active: boolean; jobId?: string | null }
+  | { type: 'SAVE_PRESET'; preset: SavedPreset }
+  | { type: 'DELETE_SAVED_PRESET'; id: string };
 
 function reducer(state: State, action: Action): State {
   switch (action.type) {
@@ -93,7 +114,6 @@ function reducer(state: State, action: Action): State {
             ? {
                 ...f,
                 info: action.info,
-                // Preserve the existing asset URL when the action doesn't supply one
                 thumbnailUrl: action.thumbnailUrl ?? f.thumbnailUrl,
                 status: 'pending',
               }
@@ -140,6 +160,19 @@ function reducer(state: State, action: Action): State {
         isProcessingQueue: action.active,
         activeJobId: action.jobId !== undefined ? action.jobId : state.activeJobId,
       };
+    case 'SAVE_PRESET': {
+      const updated = [
+        ...state.savedPresets.filter((p) => p.id !== action.preset.id),
+        action.preset,
+      ];
+      persistSavedPresets(updated);
+      return { ...state, savedPresets: updated };
+    }
+    case 'DELETE_SAVED_PRESET': {
+      const updated = state.savedPresets.filter((p) => p.id !== action.id);
+      persistSavedPresets(updated);
+      return { ...state, savedPresets: updated };
+    }
     default:
       return state;
   }
@@ -167,13 +200,46 @@ export function useStore() {
 
 export function useSettings() {
   const { state, dispatch } = useStore();
+
   const setSettings = useCallback(
     (patch: Partial<CompressionSettings>) => dispatch({ type: 'SET_SETTINGS', payload: patch }),
     [dispatch],
   );
+
   const setPreset = useCallback(
     (preset: PresetId) => dispatch({ type: 'SET_PRESET', preset }),
     [dispatch],
   );
-  return { settings: state.settings, setSettings, setPreset };
+
+  const savePreset = useCallback(
+    (name: string) => {
+      const { preset: _preset, ...settings } = state.settings;
+      dispatch({
+        type: 'SAVE_PRESET',
+        preset: { id: crypto.randomUUID(), name: name.trim(), settings, createdAt: Date.now() },
+      });
+    },
+    [state.settings, dispatch],
+  );
+
+  const deletePreset = useCallback(
+    (id: string) => dispatch({ type: 'DELETE_SAVED_PRESET', id }),
+    [dispatch],
+  );
+
+  const applyPreset = useCallback(
+    (saved: SavedPreset) =>
+      dispatch({ type: 'SET_SETTINGS', payload: { ...saved.settings, preset: 'custom' } }),
+    [dispatch],
+  );
+
+  return {
+    settings: state.settings,
+    savedPresets: state.savedPresets,
+    setSettings,
+    setPreset,
+    savePreset,
+    deletePreset,
+    applyPreset,
+  };
 }

@@ -1,4 +1,3 @@
-import { AnimatePresence, motion } from 'motion/react';
 import { Label } from '@/components/label';
 import { Slider } from '@/components/slider';
 import {
@@ -40,89 +39,89 @@ export function CustomSettings() {
   const { settings, setSettings } = useSettings();
   const isCustom = settings.preset === 'custom';
 
+  // CSS grid-template-rows technique: stable height animation that doesn't
+  // interfere with pointer-captured elements like sliders.
   return (
-    <AnimatePresence>
-      {isCustom && (
-        <motion.div
-          initial={{ opacity: 0, height: 0 }}
-          animate={{ opacity: 1, height: 'auto' }}
-          exit={{ opacity: 0, height: 0 }}
-          transition={{ duration: 0.25, ease: [0.25, 0.1, 0.25, 1] }}
-          className="overflow-hidden"
-        >
-          <div className="space-y-4 rounded-xl border bg-card p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Custom Settings
-            </p>
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateRows: isCustom ? '1fr' : '0fr',
+        transition: 'grid-template-rows 0.25s cubic-bezier(0.25, 0.1, 0.25, 1)',
+      }}
+    >
+      <div className="overflow-hidden">
+        <div className="space-y-4 rounded-xl border bg-card p-4 pb-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Custom Settings
+          </p>
 
-            {/* CRF */}
-            <div className="space-y-2">
-              <div className="flex justify-between">
-                <Label className="text-xs">Quality (CRF)</Label>
-                <span className="text-xs font-mono text-muted-foreground">
-                  {settings.crf} — {crfLabel(settings.crf)}
-                </span>
-              </div>
-              <Slider
-                min={0}
-                max={51}
-                value={[settings.crf]}
-                onValueChange={(v) => setSettings({ crf: (v as number[])[0] })}
-              />
-              <div className="flex justify-between text-[10px] text-muted-foreground">
-                <span>Best quality</span>
-                <span>Smallest file</span>
-              </div>
+          {/* CRF */}
+          <div className="space-y-2">
+            <div className="flex justify-between">
+              <Label className="text-xs">Quality (CRF)</Label>
+              <span className="text-xs font-mono text-muted-foreground">
+                {settings.crf} — {crfLabel(settings.crf)}
+              </span>
             </div>
-
-            <SettingsSelect
-              label="Video Codec"
-              value={settings.video_codec}
-              onChange={(v) => setSettings({ video_codec: v })}
-              options={VIDEO_CODECS}
+            <Slider
+              min={0}
+              max={51}
+              value={[settings.crf]}
+              onValueChange={(v) => setSettings({ crf: (v as number[])[0] })}
             />
-
-            <SettingsSelect
-              label="Encoding Speed"
-              value={settings.preset_speed}
-              onChange={(v) => setSettings({ preset_speed: v })}
-              options={SPEEDS}
-            />
-
-            <SettingsSelect
-              label="Resolution"
-              value={settings.resolution ?? ''}
-              onChange={(v) => setSettings({ resolution: v || null })}
-              options={RESOLUTIONS}
-            />
-
-            <SettingsSelect
-              label="Audio Codec"
-              value={settings.audio_codec}
-              onChange={(v) => setSettings({ audio_codec: v })}
-              options={AUDIO_CODECS}
-            />
-
-            {/* Audio Bitrate */}
-            <div className="space-y-2">
-              <div className="flex justify-between">
-                <Label className="text-xs">Audio Bitrate</Label>
-                <span className="text-xs font-mono text-muted-foreground">
-                  {settings.audio_bitrate} kbps
-                </span>
-              </div>
-              <Slider
-                min={64}
-                max={320}
-                step={16}
-                value={[settings.audio_bitrate]}
-                onValueChange={(v) => setSettings({ audio_bitrate: (v as number[])[0] })}
-              />
+            <div className="flex justify-between text-[10px] text-muted-foreground">
+              <span>Best quality</span>
+              <span>Smallest file</span>
             </div>
           </div>
-        </motion.div>
-      )}
-    </AnimatePresence>
+
+          <SettingsSelect
+            label="Video Codec"
+            value={settings.video_codec}
+            onChange={(v) => setSettings({ video_codec: v })}
+            options={VIDEO_CODECS}
+          />
+
+          <SettingsSelect
+            label="Encoding Speed"
+            value={settings.preset_speed}
+            onChange={(v) => setSettings({ preset_speed: v })}
+            options={SPEEDS}
+          />
+
+          <SettingsSelect
+            label="Resolution"
+            value={settings.resolution ?? ''}
+            onChange={(v) => setSettings({ resolution: v || null })}
+            options={RESOLUTIONS}
+          />
+
+          <SettingsSelect
+            label="Audio Codec"
+            value={settings.audio_codec}
+            onChange={(v) => setSettings({ audio_codec: v })}
+            options={AUDIO_CODECS}
+          />
+
+          {/* Audio Bitrate */}
+          <div className="space-y-2">
+            <div className="flex justify-between">
+              <Label className="text-xs">Audio Bitrate</Label>
+              <span className="text-xs font-mono text-muted-foreground">
+                {settings.audio_bitrate} kbps
+              </span>
+            </div>
+            <Slider
+              min={64}
+              max={320}
+              step={16}
+              value={[settings.audio_bitrate]}
+              onValueChange={(v) => setSettings({ audio_bitrate: (v as number[])[0] })}
+            />
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
