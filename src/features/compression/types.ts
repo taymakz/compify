@@ -163,12 +163,17 @@ export const FORMAT_LABELS: Record<VideoFormat, string> = {
 };
 
 export const CODEC_LABELS: Record<string, string> = {
-  libx264: 'H.264 (AVC)',
-  libx265: 'H.265 (HEVC)',
-  'libvpx-vp9': 'VP9',
-  copy: 'Copy (no re-encode)',
+  libx264: "H.264 (x264)",
+  libopenh264: "H.264 (OpenH264)",
+  h264_nvenc: "H.264 (NVIDIA NVENC)",
+  h264_amf: "H.264 (AMD AMF)",
+  h264_qsv: "H.264 (Intel QuickSync)",
+  libx265: "H.265 (HEVC)",
+  "libvpx-vp9": "VP9",
+  libsvtav1: "AV1 (SVT)",
+  "libaom-av1": "AV1",
+  copy: "Copy",
 };
-
 export const AUDIO_CODEC_LABELS: Record<string, string> = {
   aac: 'AAC',
   libmp3lame: 'MP3',

@@ -1,13 +1,10 @@
-use std::path::PathBuf;
-use futures_util::StreamExt;
-use tauri::{ipc::Channel, Manager};
 use crate::types::{DownloadEvent, FFmpegStatus};
+use futures_util::StreamExt;
+use std::path::PathBuf;
+use tauri::{ipc::Channel, Manager};
 
 pub fn get_ffmpeg_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    let data_dir = app
-        .path()
-        .app_local_data_dir()
-        .map_err(|e| e.to_string())?;
+    let data_dir = app.path().app_local_data_dir().map_err(|e| e.to_string())?;
     Ok(data_dir.join("ffmpeg"))
 }
 
@@ -31,6 +28,25 @@ pub fn ffprobe_exe(app: &tauri::AppHandle) -> Option<PathBuf> {
     if path.exists() { Some(path) } else { None }
 }
 
+/// تست واقعی انکودر (synchronous)
+fn test_encoder(ffmpeg_exe: &str, encoder: &str) -> bool {
+    let result = std::process::Command::new(ffmpeg_exe)
+        .args([
+            "-f", "lavfi",
+            "-i", "color=c=black:s=192x108:d=0.1",
+            "-c:v", encoder,
+            "-t", "0.1",
+            "-f", "null",
+            "-",
+        ])
+        .output();
+
+    match result {
+        Ok(output) => output.status.success(),
+        Err(_) => false,
+    }
+}
+
 fn run_version(exe: &str) -> Option<String> {
     let mut cmd = std::process::Command::new(exe);
     cmd.arg("-version");
@@ -38,7 +54,7 @@ fn run_version(exe: &str) -> Option<String> {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        cmd.creation_flags(0x08000000);
     }
 
     cmd.output()
@@ -55,55 +71,61 @@ fn run_version(exe: &str) -> Option<String> {
         })
 }
 
-/// Probe which video encoders are available in the given FFmpeg binary.
-/// Returns the best one found, in priority order.
-/// Accepts any build — even one without libx264 — as long as it can encode video.
-fn detect_best_codec(ffmpeg_exe: &str) -> Option<String> {
-    let mut cmd = std::process::Command::new(ffmpeg_exe);
-    cmd.args(["-hide_banner", "-encoders"]);
+/// تشخیص بهترین کدک (اولویت نرم‌افزاری قوی)
+pub fn detect_best_codec(ffmpeg_exe: &str) -> Option<String> {
+    let output = std::process::Command::new(ffmpeg_exe)
+        .args(["-hide_banner", "-encoders"])
+        .output()
+        .ok()?;
 
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
-    }
-
-    let output = cmd.output().ok()?;
     let text = String::from_utf8_lossy(&output.stdout);
 
-    // Priority: libx264 (best compat) > libx265 (smaller) > libvpx-vp9 (open) > libsvtav1 (AV1)
-    let candidates = ["libx264", "libx265", "libvpx-vp9", "libsvtav1", "libaom-av1"];
-    for codec in candidates {
+    let candidates = [
+        ("libx264", true),
+        ("libsvtav1", true),
+        ("libvpx-vp9", true),
+        ("libaom-av1", true),
+        ("h264_nvenc", false),
+        ("h264_amf", false),
+        ("h264_qsv", false),
+    ];
+
+    for (codec, is_software) in candidates {
         if text.contains(codec) {
-            return Some(codec.to_string());
+            if is_software {
+                return Some(codec.to_string());
+            } else if test_encoder(ffmpeg_exe, codec) {
+                return Some(codec.to_string());
+            }
         }
     }
     None
 }
 
-/// Returns the system `ffmpeg` path when it has at least one supported video encoder.
-/// Accepts builds that lack libx264 (e.g. compiled with --disable-libx264) as long
-/// as VP9 / AV1 / etc. are present — the detected codec is auto-applied as the default.
 pub fn validated_system_ffmpeg() -> Option<(String, String)> {
-    run_version("ffmpeg")?; // verify it runs
+    run_version("ffmpeg")?;
     let codec = detect_best_codec("ffmpeg")?;
     Some(("ffmpeg".into(), codec))
 }
 
 pub fn check_ffmpeg(app: &tauri::AppHandle) -> FFmpegStatus {
-    // Prefer the app-managed BtbN GPL binary (always has libx264 and more)
+    // اولویت اول: نسخه داخل اپ
     if let Some(path) = ffmpeg_exe(app) {
         let exe_str = path.to_str().unwrap_or("ffmpeg");
+
         if let Some(version) = run_version(exe_str) {
+            let codec = detect_best_codec(exe_str);
+
             return FFmpegStatus {
                 installed: true,
                 version: Some(version),
                 path: Some(path.to_string_lossy().to_string()),
-                preferred_codec: Some("libx264".into()),
+                preferred_codec: codec,
             };
         }
     }
-    // Fall back to any system FFmpeg that has at least one usable video encoder.
+
+    // اولویت دوم: سیستم
     if let Some((sys_path, codec)) = validated_system_ffmpeg() {
         let version = run_version("ffmpeg");
         return FFmpegStatus {
@@ -113,12 +135,20 @@ pub fn check_ffmpeg(app: &tauri::AppHandle) -> FFmpegStatus {
             preferred_codec: Some(codec),
         };
     }
-    FFmpegStatus { installed: false, version: None, path: None, preferred_codec: None }
+
+    FFmpegStatus {
+        installed: false,
+        version: None,
+        path: None,
+        preferred_codec: None,
+    }
 }
+
+// ====================== دانلود و نصب ======================
 
 fn build_client() -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
-        .user_agent("tauri-video-compressor/1.0")
+        .user_agent("compify-video-compressor/1.0")
         .build()
         .map_err(|e| e.to_string())
 }
@@ -143,22 +173,13 @@ pub async fn download_and_install_ffmpeg(
 
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
-        return Err(
-            "Auto-install is not available on this platform. \
-             Please install FFmpeg via your package manager \
-             (e.g. `sudo apt install ffmpeg` on Ubuntu/Debian, \
-             `sudo dnf install ffmpeg` on Fedora, \
-             `sudo pacman -S ffmpeg` on Arch) and restart the app."
-                .to_string(),
-        );
+        return Err("Auto-install is not supported on this platform.".to_string());
     }
 
     on_event.send(DownloadEvent::Complete).ok();
     Ok(())
 }
 
-/// Download a zip, stream it to disk, then extract the ffmpeg/ffprobe binaries.
-/// Used on Windows where BtbN packages both binaries in a single zip under `bin/`.
 async fn download_zip_extract_bins(
     url: &str,
     ffmpeg_dir: &std::path::Path,
@@ -167,11 +188,7 @@ async fn download_zip_extract_bins(
     use std::io::Write;
 
     let client = build_client()?;
-    let response = client
-        .get(url)
-        .send()
-        .await
-        .map_err(|e| format!("Download failed: {}", e))?;
+    let response = client.get(url).send().await.map_err(|e| e.to_string())?;
 
     if !response.status().is_success() {
         return Err(format!("Download failed: HTTP {}", response.status()));
@@ -179,8 +196,7 @@ async fn download_zip_extract_bins(
 
     let total = response.content_length().unwrap_or(0);
     let zip_path = ffmpeg_dir.join("ffmpeg_tmp.zip");
-    let mut file =
-        std::fs::File::create(&zip_path).map_err(|e| format!("Cannot create zip: {}", e))?;
+    let mut file = std::fs::File::create(&zip_path).map_err(|e| e.to_string())?;
 
     let mut stream = response.bytes_stream();
     let mut downloaded: u64 = 0;
@@ -189,46 +205,36 @@ async fn download_zip_extract_bins(
         let chunk = chunk.map_err(|e| e.to_string())?;
         file.write_all(&chunk).map_err(|e| e.to_string())?;
         downloaded += chunk.len() as u64;
-        let percent = if total > 0 {
-            downloaded as f64 / total as f64 * 100.0
-        } else {
-            0.0
-        };
-        on_event
-            .send(DownloadEvent::Progress { downloaded, total, percent })
-            .ok();
-    }
-    drop(file);
 
+        let percent = if total > 0 { (downloaded as f64 / total as f64) * 100.0 } else { 0.0 };
+        on_event.send(DownloadEvent::Progress { downloaded, total, percent }).ok();
+    }
+
+    drop(file);
     on_event.send(DownloadEvent::Extracting).ok();
 
-    let zip_file =
-        std::fs::File::open(&zip_path).map_err(|e| format!("Cannot open zip: {}", e))?;
-    let mut archive =
-        zip::ZipArchive::new(zip_file).map_err(|e| format!("Bad zip: {}", e))?;
+    let zip_file = std::fs::File::open(&zip_path).map_err(|e| e.to_string())?;
+    let mut archive = zip::ZipArchive::new(zip_file).map_err(|e| e.to_string())?;
 
-    let ffmpeg_name  = ffmpeg_bin();
+    let ffmpeg_name = ffmpeg_bin();
     let ffprobe_name = ffprobe_bin();
 
     for i in 0..archive.len() {
         let mut entry = archive.by_index(i).map_err(|e| e.to_string())?;
         let name = entry.name().to_string();
 
-        let target = if name.ends_with(&format!("/bin/{}", ffmpeg_name))
-            || name.ends_with(&format!("\\bin\\{}", ffmpeg_name))
-        {
+        let target = if name.ends_with(&format!("/bin/{}", ffmpeg_name)) || 
+                       name.ends_with(&format!("\\bin\\{}", ffmpeg_name)) {
             Some(ffmpeg_dir.join(ffmpeg_name))
-        } else if name.ends_with(&format!("/bin/{}", ffprobe_name))
-            || name.ends_with(&format!("\\bin\\{}", ffprobe_name))
-        {
+        } else if name.ends_with(&format!("/bin/{}", ffprobe_name)) || 
+                  name.ends_with(&format!("\\bin\\{}", ffprobe_name)) {
             Some(ffmpeg_dir.join(ffprobe_name))
         } else {
             None
         };
 
         if let Some(dest) = target {
-            let mut out =
-                std::fs::File::create(&dest).map_err(|e| e.to_string())?;
+            let mut out = std::fs::File::create(&dest).map_err(|e| e.to_string())?;
             std::io::copy(&mut entry, &mut out).map_err(|e| e.to_string())?;
             set_executable(&dest)?;
         }
@@ -238,8 +244,7 @@ async fn download_zip_extract_bins(
     Ok(())
 }
 
-/// macOS: download ffmpeg and ffprobe separately from evermeet.cx.
-/// Each zip contains only the binary at the root.
+// macOS Support
 #[cfg(target_os = "macos")]
 async fn download_macos_binaries(
     ffmpeg_dir: &std::path::Path,
@@ -254,8 +259,7 @@ async fn download_macos_binaries(
         on_event,
         0.0,
         50.0,
-    )
-    .await?;
+    ).await?;
 
     download_evermeet(
         &client,
@@ -264,14 +268,11 @@ async fn download_macos_binaries(
         on_event,
         50.0,
         100.0,
-    )
-    .await?;
+    ).await?;
 
     Ok(())
 }
 
-/// Download a single-binary zip from evermeet.cx and extract the first non-directory entry.
-/// `progress_start` / `progress_end` allow mapping download progress to a sub-range (0-100).
 #[cfg(target_os = "macos")]
 async fn download_evermeet(
     client: &reqwest::Client,
@@ -281,11 +282,7 @@ async fn download_evermeet(
     progress_start: f64,
     progress_end: f64,
 ) -> Result<(), String> {
-    let response = client
-        .get(url)
-        .send()
-        .await
-        .map_err(|e| format!("Download failed: {}", e))?;
+    let response = client.get(url).send().await.map_err(|e| e.to_string())?;
 
     if !response.status().is_success() {
         return Err(format!("Download failed: HTTP {}", response.status()));
@@ -300,30 +297,28 @@ async fn download_evermeet(
         let chunk = chunk.map_err(|e| e.to_string())?;
         zip_bytes.extend_from_slice(&chunk);
         downloaded += chunk.len() as u64;
+
         let raw = if total > 0 { downloaded as f64 / total as f64 } else { 0.0 };
         let percent = progress_start + raw * (progress_end - progress_start);
-        on_event
-            .send(DownloadEvent::Progress { downloaded, total, percent })
-            .ok();
+        on_event.send(DownloadEvent::Progress { downloaded, total, percent }).ok();
     }
 
     on_event.send(DownloadEvent::Extracting).ok();
 
     let cursor = std::io::Cursor::new(zip_bytes);
-    let mut archive =
-        zip::ZipArchive::new(cursor).map_err(|e| format!("Bad zip: {}", e))?;
+    let mut archive = zip::ZipArchive::new(cursor).map_err(|e| e.to_string())?;
 
     for i in 0..archive.len() {
         let mut entry = archive.by_index(i).map_err(|e| e.to_string())?;
         let name = entry.name().to_string();
 
-        // Skip directory entries and metadata files
-        if name.ends_with('/') { continue; }
-        let lower = name.to_lowercase();
-        if lower.ends_with(".txt") || lower.ends_with(".md") { continue; }
+        if name.ends_with('/') || 
+           name.to_lowercase().ends_with(".txt") || 
+           name.to_lowercase().ends_with(".md") {
+            continue;
+        }
 
-        let mut out =
-            std::fs::File::create(dest).map_err(|e| e.to_string())?;
+        let mut out = std::fs::File::create(dest).map_err(|e| e.to_string())?;
         std::io::copy(&mut entry, &mut out).map_err(|e| e.to_string())?;
         set_executable(dest)?;
         return Ok(());
@@ -332,7 +327,6 @@ async fn download_evermeet(
     Err("No binary found in the downloaded zip".to_string())
 }
 
-/// Set the executable bit on Unix; no-op on Windows.
 fn set_executable(_path: &std::path::Path) -> Result<(), String> {
     #[cfg(unix)]
     {

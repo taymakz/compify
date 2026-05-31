@@ -7,6 +7,30 @@ use tauri::ipc::Channel;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 
+/// تست سریع انکودر سخت‌افزاری
+fn test_encoder_sync(ffmpeg_path: &str, encoder: &str) -> bool {
+    let result = std::process::Command::new(ffmpeg_path)
+        .args([
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=black:s=192x108:d=0.1",
+            "-c:v",
+            encoder,
+            "-t",
+            "0.1",
+            "-f",
+            "null",
+            "-",
+        ])
+        .output();
+
+    match result {
+        Ok(output) => output.status.success(),
+        Err(_) => false,
+    }
+}
+
 #[allow(dead_code)]
 pub struct JobHandle {
     pub pid: u32,
@@ -22,7 +46,7 @@ pub async fn run_compression(
     job_id: String,
     input_path: String,
     output_path: String,
-    settings: CompressionSettings,
+    mut settings: CompressionSettings,
     on_event: Channel<CompressionEvent>,
     jobs: JobMap,
 ) -> Result<(), String> {
@@ -30,114 +54,142 @@ pub async fn run_compression(
     let total_frames = get_total_frames(&ffprobe_path, &input_path).await;
     let start = std::time::Instant::now();
 
-    let mut args: Vec<String> = vec![
-        "-y".into(),
-        "-i".into(),
-        input_path.clone(),
-    ];
+    // ====================== Fallback انکودر ویدیو ======================
+    if matches!(
+        settings.video_codec.as_str(),
+        "h264_nvenc" | "h264_amf" | "h264_qsv"
+    ) {
+        if !test_encoder_sync(&ffmpeg_path, &settings.video_codec) {
+            println!(
+                "[Compify] Hardware encoder '{}' unavailable → falling back to libx264",
+                settings.video_codec
+            );
+            settings.video_codec = "libx264".to_string();
+            settings.preset_speed = "medium".to_string();
+        }
+    }
 
-    // Map only the primary video and all audio streams — skip subtitles,
-    // data tracks, and attachments that may be unsupported by the container.
-    args.extend([
-        "-map".into(), "0:v:0".into(),
-        "-map".into(), "0:a?".into(),
-    ]);
+    // ====================== تنظیمات سازگار با WebM ======================
+    let is_webm = settings.output_format == "webm";
 
-    // Video codec + quality / speed flags (codec-specific)
+    if is_webm {
+        // WebM فقط AV1/VP9 + Opus پشتیبانی می‌کند
+        if !matches!(
+            settings.video_codec.as_str(),
+            "libsvtav1" | "libvpx-vp9" | "libaom-av1"
+        ) {
+            settings.video_codec = "libsvtav1".to_string();
+        }
+        if !matches!(settings.audio_codec.as_str(), "libopus" | "copy") {
+            println!("[Compify] WebM output → forcing libopus audio codec");
+            settings.audio_codec = "libopus".to_string();
+            settings.audio_bitrate = 128; // مناسب برای Opus
+        }
+    }
+
+    let mut args: Vec<String> = vec!["-y".into(), "-i".into(), input_path.clone()];
+
+    args.extend(["-map".into(), "0:v:0".into(), "-map".into(), "0:a?".into()]);
+
+    // ====================== Video Codec ======================
     args.extend(["-c:v".into(), settings.video_codec.clone()]);
+
     match settings.video_codec.as_str() {
-        "copy" => { /* stream copy — no quality or speed flags */ }
+        "copy" => {}
+
         "libvpx-vp9" => {
-            // VP9 constant-quality mode requires -b:v 0 combined with -crf;
-            // it does not support -preset — use -cpu-used (0=slowest, 8=fastest).
-            let cpu = match settings.preset_speed.as_str() {
-                "ultrafast" | "superfast"            => "8",
-                "veryfast"  | "faster"               => "6",
-                "fast"                               => "5",
-                "slow"                               => "2",
-                "slower"    | "veryslow" | "placebo" => "0",
-                _                                    => "4",
+            let cpu_used = match settings.preset_speed.as_str() {
+                "ultrafast" | "superfast" => "8",
+                "veryfast" | "faster" => "6",
+                "fast" => "5",
+                "slow" => "2",
+                "slower" | "veryslow" | "placebo" => "0",
+                _ => "4",
             };
             args.extend([
-                "-crf".into(), settings.crf.to_string(),
-                "-b:v".into(), "0".into(),
-                "-cpu-used".into(), cpu.into(),
+                "-crf".into(),
+                settings.crf.to_string(),
+                "-b:v".into(),
+                "0".into(),
+                "-cpu-used".into(),
+                cpu_used.into(),
             ]);
         }
+
         "libsvtav1" | "libaom-av1" => {
-            // AV1 encoders use -crf without -preset; SVT-AV1 uses -preset as a speed preset (0-13)
-            let av1_preset = match settings.preset_speed.as_str() {
+            let preset = match settings.preset_speed.as_str() {
                 "ultrafast" | "superfast" => "12",
-                "veryfast"  | "faster"   => "10",
-                "fast"                   => "8",
-                "slow"                   => "4",
-                "slower"   | "veryslow"  => "2",
-                _                        => "6", // medium
+                "veryfast" | "faster" => "10",
+                "fast" => "8",
+                "slow" => "4",
+                "slower" | "veryslow" => "2",
+                _ => "6",
             };
             args.extend([
-                "-crf".into(), settings.crf.to_string(),
-                "-preset".into(), av1_preset.into(),
+                "-crf".into(),
+                settings.crf.to_string(),
+                "-preset".into(),
+                preset.into(),
             ]);
         }
+
         _ => {
-            // H.264, H.265 and others that support -preset / -crf.
-            // yuv420p gives the widest device compatibility.
             args.extend([
-                "-crf".into(),     settings.crf.to_string(),
-                "-preset".into(),  settings.preset_speed.clone(),
-                "-pix_fmt".into(), "yuv420p".into(),
+                "-crf".into(),
+                settings.crf.to_string(),
+                "-preset".into(),
+                settings.preset_speed.clone(),
+                "-pix_fmt".into(),
+                "yuv420p".into(),
             ]);
         }
     }
 
-    // Scale filter — only when re-encoding (copy codec must NOT have -vf)
+    // Filter Chain
     if settings.video_codec != "copy" {
         let vf = if let Some(ref res) = settings.resolution {
-            // Scale to fit within the target box while preserving aspect ratio,
-            // then round to even dimensions as required by most encoders.
             format!(
-                "scale={}:force_original_aspect_ratio=decrease,\
-                 scale=trunc(iw/2)*2:trunc(ih/2)*2",
+                "scale={}:force_original_aspect_ratio=decrease,scale=trunc(iw/2)*2:trunc(ih/2)*2",
                 res
             )
         } else {
-            // No resize — just ensure even dimensions.
-            "scale=trunc(iw/2)*2:trunc(ih/2)*2".into()
+            "scale=trunc(iw/2)*2:trunc(ih/2)*2".to_string()
         };
         args.extend(["-vf".into(), vf]);
     }
 
-    // FPS
     if let Some(fps) = settings.fps {
         args.extend(["-r".into(), fps.to_string()]);
     }
 
-    // Audio codec
+    // ====================== Audio Codec ======================
     if settings.audio_codec == "copy" {
         args.extend(["-c:a".into(), "copy".into()]);
     } else {
         args.extend([
-            "-c:a".into(), settings.audio_codec.clone(),
-            "-b:a".into(), format!("{}k", settings.audio_bitrate),
+            "-c:a".into(),
+            settings.audio_codec.clone(),
+            "-b:a".into(),
+            format!("{}k", settings.audio_bitrate),
         ]);
     }
 
-    // Move moov atom to the front for instant playback in MP4-family containers.
-    match settings.output_format.as_str() {
-        "mp4" | "m4v" | "mov" => {
-            args.extend(["-movflags".into(), "+faststart".into()]);
-        }
-        _ => {}
+    // Faststart + Container specific
+    if matches!(settings.output_format.as_str(), "mp4" | "m4v" | "mov") {
+        args.extend(["-movflags".into(), "+faststart".into()]);
     }
 
-    // Structured progress to stderr
+    // Progress
     args.extend([
-        "-progress".into(), "pipe:2".into(),
+        "-progress".into(),
+        "pipe:2".into(),
         "-nostats".into(),
-        "-loglevel".into(), "error".into(),
+        "-loglevel".into(),
+        "error".into(),
     ]);
     args.push(output_path.clone());
 
+    // ====================== Run FFmpeg ======================
     let mut cmd = Command::new(&ffmpeg_path);
     cmd.args(&args)
         .stderr(std::process::Stdio::piped())
@@ -146,7 +198,8 @@ pub async fn run_compression(
 
     #[cfg(windows)]
     {
-        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000);
     }
 
     let mut child = cmd
@@ -162,31 +215,31 @@ pub async fn run_compression(
         let mut map = jobs.lock().unwrap();
         map.insert(
             job_id.clone(),
-            JobHandle { pid, cancel_flag: cancel_flag.clone(), pause_flag: pause_flag.clone() },
+            JobHandle {
+                pid,
+                cancel_flag: cancel_flag.clone(),
+                pause_flag: pause_flag.clone(),
+            },
         );
     }
 
     let stderr = child.stderr.take().expect("stderr not captured");
     let mut lines = BufReader::new(stderr).lines();
     let mut kvs: HashMap<String, String> = HashMap::new();
-    // Collect non-KV lines (FFmpeg error messages)
     let mut error_lines: Vec<String> = Vec::new();
 
     loop {
-        // Handle pause
         if pause_flag.load(Ordering::Relaxed) {
             suspend_process(pid);
-            loop {
-                tokio::time::sleep(Duration::from_millis(150)).await;
-                if cancel_flag.load(Ordering::Relaxed) { break; }
-                if !pause_flag.load(Ordering::Relaxed) {
-                    resume_process(pid);
+            while pause_flag.load(Ordering::Relaxed) {
+                if cancel_flag.load(Ordering::Relaxed) {
                     break;
                 }
+                tokio::time::sleep(Duration::from_millis(150)).await;
             }
+            resume_process(pid);
         }
 
-        // Handle cancel
         if cancel_flag.load(Ordering::Relaxed) {
             child.kill().await.ok();
             std::fs::remove_file(&output_path).ok();
@@ -194,14 +247,11 @@ pub async fn run_compression(
             return Err("cancelled".into());
         }
 
-        let line_result =
-            tokio::time::timeout(Duration::from_millis(200), lines.next_line()).await;
-
+        let line_result = tokio::time::timeout(Duration::from_millis(200), lines.next_line()).await;
         let line = match line_result {
-            Err(_) => continue,           // timeout — re-check flags
+            Err(_) => continue,
             Ok(Ok(Some(l))) => l,
-            Ok(Ok(None)) => break,        // EOF
-            Ok(Err(_)) => break,
+            _ => break,
         };
 
         if let Some((key, val)) = line.split_once('=') {
@@ -212,8 +262,10 @@ pub async fn run_compression(
                 let frame: u64 = kvs.get("frame").and_then(|v| v.parse().ok()).unwrap_or(0);
                 let fps: f64 = kvs.get("fps").and_then(|v| v.parse().ok()).unwrap_or(0.0);
                 let speed = kvs.get("speed").cloned().unwrap_or_else(|| "0x".into());
-                let current_size: u64 =
-                    kvs.get("total_size").and_then(|v| v.parse().ok()).unwrap_or(0);
+                let current_size: u64 = kvs
+                    .get("total_size")
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(0);
 
                 let percent = if total_frames > 0 {
                     (frame as f64 / total_frames as f64 * 100.0).min(99.9)
@@ -228,21 +280,28 @@ pub async fn run_compression(
                     0.0
                 };
 
-                on_event.send(CompressionEvent::Progress {
-                    job_id: job_id.clone(), percent, fps, speed,
-                    current_size, eta, frame, total_frames,
-                }).ok();
+                on_event
+                    .send(CompressionEvent::Progress {
+                        job_id: job_id.clone(),
+                        percent,
+                        fps,
+                        speed,
+                        current_size,
+                        eta,
+                        frame,
+                        total_frames,
+                    })
+                    .ok();
 
-                if val == "end" { break; }
+                if val == "end" {
+                    break;
+                }
                 kvs.clear();
             } else {
                 kvs.insert(key, val);
             }
-        } else {
-            let trimmed = line.trim().to_string();
-            if !trimmed.is_empty() {
-                error_lines.push(trimmed);
-            }
+        } else if !line.trim().is_empty() {
+            error_lines.push(line.trim().to_string());
         }
     }
 
@@ -255,34 +314,42 @@ pub async fn run_compression(
 
     if !status.success() {
         let detail = if error_lines.is_empty() {
-            format!("exit code {:?}", status.code())
+            format!("exit code: {:?}", status.code())
         } else {
             error_lines.join(" | ")
         };
         return Err(format!("FFmpeg failed: {}", detail));
     }
 
-    let output_size = std::fs::metadata(&output_path).map(|m| m.len()).unwrap_or(0);
+    let output_size = std::fs::metadata(&output_path)
+        .map(|m| m.len())
+        .unwrap_or(0);
 
-    on_event.send(CompressionEvent::Complete {
-        job_id,
-        original_size,
-        output_size,
-        output_path,
-        duration_secs: start.elapsed().as_secs_f64(),
-    }).ok();
+    on_event
+        .send(CompressionEvent::Complete {
+            job_id,
+            original_size,
+            output_size,
+            output_path,
+            duration_secs: start.elapsed().as_secs_f64(),
+        })
+        .ok();
 
     Ok(())
 }
-
+// Helper Functions
 async fn get_total_frames(ffprobe: &str, input: &str) -> u64 {
     let out = tokio::process::Command::new(ffprobe)
         .args([
-            "-v", "quiet",
-            "-select_streams", "v:0",
+            "-v",
+            "quiet",
+            "-select_streams",
+            "v:0",
             "-count_packets",
-            "-show_entries", "stream=nb_read_packets,r_frame_rate,duration",
-            "-print_format", "json",
+            "-show_entries",
+            "stream=nb_read_packets,r_frame_rate,duration",
+            "-print_format",
+            "json",
             input,
         ])
         .output()
@@ -296,7 +363,9 @@ async fn get_total_frames(ffprobe: &str, input: &str) -> u64 {
                     .as_str()
                     .and_then(|s| s.parse::<u64>().ok())
                 {
-                    if n > 0 { return n; }
+                    if n > 0 {
+                        return n;
+                    }
                 }
                 let duration: f64 = stream["duration"]
                     .as_str()
@@ -316,22 +385,31 @@ fn parse_fraction(s: &str) -> f64 {
     if let Some((a, b)) = s.split_once('/') {
         let a: f64 = a.trim().parse().unwrap_or(0.0);
         let b: f64 = b.trim().parse().unwrap_or(1.0);
-        if b != 0.0 { a / b } else { 0.0 }
+        if b != 0.0 {
+            a / b
+        } else {
+            0.0
+        }
     } else {
         s.trim().parse().unwrap_or(0.0)
     }
 }
 
+// Pause / Resume
 #[cfg(windows)]
 pub fn suspend_process(pid: u32) {
     use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
     use windows_sys::Win32::System::Diagnostics::ToolHelp::*;
     use windows_sys::Win32::System::Threading::*;
+
     unsafe {
         let snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
-        if snap == INVALID_HANDLE_VALUE { return; }
+        if snap == INVALID_HANDLE_VALUE {
+            return;
+        }
         let mut entry: THREADENTRY32 = std::mem::zeroed();
         entry.dwSize = std::mem::size_of::<THREADENTRY32>() as u32;
+
         if Thread32First(snap, &mut entry) != 0 {
             loop {
                 if entry.th32OwnerProcessID == pid {
@@ -341,7 +419,9 @@ pub fn suspend_process(pid: u32) {
                         windows_sys::Win32::Foundation::CloseHandle(t);
                     }
                 }
-                if Thread32Next(snap, &mut entry) == 0 { break; }
+                if Thread32Next(snap, &mut entry) == 0 {
+                    break;
+                }
             }
         }
         windows_sys::Win32::Foundation::CloseHandle(snap);
@@ -353,11 +433,15 @@ pub fn resume_process(pid: u32) {
     use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
     use windows_sys::Win32::System::Diagnostics::ToolHelp::*;
     use windows_sys::Win32::System::Threading::*;
+
     unsafe {
         let snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
-        if snap == INVALID_HANDLE_VALUE { return; }
+        if snap == INVALID_HANDLE_VALUE {
+            return;
+        }
         let mut entry: THREADENTRY32 = std::mem::zeroed();
         entry.dwSize = std::mem::size_of::<THREADENTRY32>() as u32;
+
         if Thread32First(snap, &mut entry) != 0 {
             loop {
                 if entry.th32OwnerProcessID == pid {
@@ -367,7 +451,9 @@ pub fn resume_process(pid: u32) {
                         windows_sys::Win32::Foundation::CloseHandle(t);
                     }
                 }
-                if Thread32Next(snap, &mut entry) == 0 { break; }
+                if Thread32Next(snap, &mut entry) == 0 {
+                    break;
+                }
             }
         }
         windows_sys::Win32::Foundation::CloseHandle(snap);
@@ -376,5 +462,6 @@ pub fn resume_process(pid: u32) {
 
 #[cfg(not(windows))]
 pub fn suspend_process(_pid: u32) {}
+
 #[cfg(not(windows))]
 pub fn resume_process(_pid: u32) {}
