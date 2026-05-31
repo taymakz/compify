@@ -44,7 +44,7 @@ export function FileCard({ file, isActive, onCompress, onPlay }: Props) {
         isActive && 'border-primary/40 ring-1 ring-primary/20',
       )}
     >
-      <div className="flex gap-3 p-3">
+      <div className="flex gap-3 p-3 relative">
         <Thumbnail file={file} onPlay={onPlay} />
 
         <div className="flex min-w-0 flex-1 flex-col gap-1">
@@ -83,7 +83,7 @@ export function FileCard({ file, isActive, onCompress, onPlay }: Props) {
           )}
 
           {file.status === 'completed' && file.result && (
-            <ResultRow file={file} openFile={openFile} openFolder={openFolder} />
+            <ResultRow file={file} openFile={openFile} openFolder={openFolder} /> 
           )}
 
           {file.status === 'error' && file.error && (
@@ -92,7 +92,7 @@ export function FileCard({ file, isActive, onCompress, onPlay }: Props) {
         </div>
 
         {/* Action buttons */}
-        <div className="flex flex-col gap-1">
+        <div className="absolute top-3 right-3 flex  gap-1">
           {file.status === 'pending' && (
             <Button size="icon-sm" variant="outline" onClick={onCompress} title="Compress">
               <span className="icon-[material-symbols--play-arrow] size-3.5" />
