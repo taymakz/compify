@@ -113,7 +113,7 @@ function Header({
       <div className="flex items-center gap-2.5">
         <img src={logoSrc} alt="Compify" className="size-7 rounded-lg object-contain" />
         <span className="text-sm font-bold tracking-tight">Compify</span>
-        <Badge variant="secondary" className="text-[10px]">v1.0</Badge>
+        <Badge variant="secondary" className="text-[10px]">v0.1</Badge>
         {ffmpegVersion && (
           <Badge variant="outline" className="text-[10px] text-muted-foreground">
             FFmpeg {ffmpegVersion}
