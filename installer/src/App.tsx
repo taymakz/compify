@@ -35,16 +35,23 @@ export default function App() {
   const [installedExe, setInstalledExe] = useState("");
   const [existing, setExisting] = useState<ExistingInstallation | null>(null);
   const [installError, setInstallError] = useState<string | null>(null);
+  const [appVersion, setAppVersion] = useState("0.1.0");
 
   useEffect(() => {
     invoke<string>("get_default_install_dir").then(setInstallDir).catch(console.error);
     invoke<ExistingInstallation | null>("check_existing_installation").then(setExisting).catch(console.error);
+    invoke<string>("get_app_version").then(setAppVersion).catch(console.error);
   }, []);
 
   const pickFolder = async () => {
     try {
       const dir = await invoke<string | null>("pick_directory");
-      if (dir) setInstallDir(dir);
+      if (dir) {
+        const sep = dir.includes("/") ? "/" : "\\";
+        const normalized = dir.replace(/[\\/]+$/, "");
+        const endsWithCompify = normalized.toLowerCase().endsWith(`${sep}compify`) || normalized.toLowerCase() === "compify";
+        setInstallDir(endsWithCompify ? normalized : `${normalized}${sep}Compify`);
+      }
     } catch {}
   };
 
@@ -116,7 +123,7 @@ export default function App() {
         <AnimatePresence mode="wait" initial={false}>
           {step === "welcome" && (
             <StepPane key="welcome">
-              <WelcomeStep onNext={() => setStep("location")} />
+              <WelcomeStep onNext={() => setStep("location")} version={appVersion} />
             </StepPane>
           )}
           {step === "location" && (
@@ -168,7 +175,7 @@ function StepPane({ children }: { children: React.ReactNode }) {
 
 // ── Step: Welcome ─────────────────────────────────────────────────────────────
 
-function WelcomeStep({ onNext }: { onNext: () => void }) {
+function WelcomeStep({ onNext, version }: { onNext: () => void; version: string }) {
   const features = [
     { color: "#f59e0b", icon: <BoltIcon />, label: "Hardware accelerated", desc: "Uses your GPU for faster compression" },
     { color: "#6366f1", icon: <TuneIcon />, label: "Smart presets", desc: "Gaming, education, quality & more" },
@@ -182,7 +189,7 @@ function WelcomeStep({ onNext }: { onNext: () => void }) {
         <img src={logoSrc} alt="Compify" style={{ width: 68, height: 68, borderRadius: 18, objectFit: "contain", boxShadow: "0 8px 32px rgba(0,0,0,0.4)" }} />
         <div style={{ textAlign: "center" }}>
           <h1 style={{ fontSize: 22, fontWeight: 700, letterSpacing: "-0.3px", color: "var(--text)" }}>Compify</h1>
-          <p style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 2 }}>Professional Video Compressor · v0.1</p>
+          <p style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 2 }}>Professional Video Compressor · v{version}</p>
         </div>
       </div>
 
