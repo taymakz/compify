@@ -30,18 +30,11 @@ pub fn ffprobe_exe(app: &tauri::AppHandle) -> Option<PathBuf> {
 
 /// تست واقعی انکودر (synchronous)
 fn test_encoder(ffmpeg_exe: &str, encoder: &str) -> bool {
-    let result = std::process::Command::new(ffmpeg_exe)
-        .args([
-            "-f", "lavfi",
-            "-i", "color=c=black:s=192x108:d=0.1",
-            "-c:v", encoder,
-            "-t", "0.1",
-            "-f", "null",
-            "-",
-        ])
-        .output();
-
-    match result {
+    let mut cmd = std::process::Command::new(ffmpeg_exe);
+    cmd.args(["-f", "lavfi", "-i", "color=c=black:s=192x108:d=0.1", "-c:v", encoder, "-t", "0.1", "-f", "null", "-"]);
+    #[cfg(windows)]
+    { use std::os::windows::process::CommandExt; cmd.creation_flags(0x08000000); }
+    match cmd.output() {
         Ok(output) => output.status.success(),
         Err(_) => false,
     }
@@ -73,10 +66,11 @@ fn run_version(exe: &str) -> Option<String> {
 
 /// تشخیص بهترین کدک (اولویت نرم‌افزاری قوی)
 pub fn detect_best_codec(ffmpeg_exe: &str) -> Option<String> {
-    let output = std::process::Command::new(ffmpeg_exe)
-        .args(["-hide_banner", "-encoders"])
-        .output()
-        .ok()?;
+    let mut cmd = std::process::Command::new(ffmpeg_exe);
+    cmd.args(["-hide_banner", "-encoders"]);
+    #[cfg(windows)]
+    { use std::os::windows::process::CommandExt; cmd.creation_flags(0x08000000); }
+    let output = cmd.output().ok()?;
 
     let text = String::from_utf8_lossy(&output.stdout);
 
@@ -90,13 +84,9 @@ pub fn detect_best_codec(ffmpeg_exe: &str) -> Option<String> {
         ("h264_qsv", false),
     ];
 
-    for (codec, is_software) in candidates {
-        if text.contains(codec) {
-            if is_software {
-                return Some(codec.to_string());
-            } else if test_encoder(ffmpeg_exe, codec) {
-                return Some(codec.to_string());
-            }
+    for (codec, _) in candidates {
+        if text.contains(codec) && test_encoder(ffmpeg_exe, codec) {
+            return Some(codec.to_string());
         }
     }
     None
