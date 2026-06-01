@@ -7,6 +7,12 @@
       "skillPath": ".claude/skills/ffmpeg/SKILL.md",
       "computedHash": "453ce416b404291eb9ae04164b68447b3f35d9fb019f924ab5b72c503b2a6dc8"
     },
+    "find-skills": {
+      "source": "vercel-labs/skills",
+      "sourceType": "github",
+      "skillPath": "skills/find-skills/SKILL.md",
+      "computedHash": "9e1c8b3103f92fa8092568a44fe64858de7c5c9dc65ce4bea8f168080e889cfd"
+    },
     "rust-best-practices": {
       "source": "apollographql/skills",
       "sourceType": "github",
