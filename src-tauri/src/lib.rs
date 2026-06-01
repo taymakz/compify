@@ -1,6 +1,9 @@
 mod compression;
 mod ffmpeg_manager;
 mod types;
+mod settings;
+mod updater;
+mod notifications;
 
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
@@ -34,26 +37,19 @@ async fn get_video_info(app: tauri::AppHandle, path: String) -> Result<VideoInfo
     let ffprobe = ffmpeg_manager::ffprobe_exe(&app)
         .map(|p| p.to_string_lossy().to_string())
         .or_else(|| {
-            std::process::Command::new("ffprobe")
-                .arg("-version")
-                .output()
-                .ok()
-                .filter(|o| o.status.success())
-                .map(|_| "ffprobe".to_string())
+            let mut cmd = std::process::Command::new("ffprobe");
+            cmd.arg("-version");
+            #[cfg(windows)]
+            { use std::os::windows::process::CommandExt; cmd.creation_flags(0x08000000); }
+            cmd.output().ok().filter(|o| o.status.success()).map(|_| "ffprobe".to_string())
         })
         .ok_or("ffprobe not found")?;
 
-    let out = tokio::process::Command::new(&ffprobe)
-        .args([
-            "-v", "quiet",
-            "-print_format", "json",
-            "-show_format",
-            "-show_streams",
-            &path,
-        ])
-        .output()
-        .await
-        .map_err(|e| e.to_string())?;
+    let mut ffprobe_cmd = tokio::process::Command::new(&ffprobe);
+    ffprobe_cmd.args(["-v", "quiet", "-print_format", "json", "-show_format", "-show_streams", &path]);
+    #[cfg(windows)]
+    { use std::os::windows::process::CommandExt; ffprobe_cmd.creation_flags(0x08000000); }
+    let out = ffprobe_cmd.output().await.map_err(|e| e.to_string())?;
 
     let json: serde_json::Value =
         serde_json::from_slice(&out.stdout).map_err(|e| e.to_string())?;
@@ -262,10 +258,11 @@ async fn open_folder(path: String) -> Result<(), String> {
         .unwrap_or(path);
 
     #[cfg(target_os = "windows")]
-    std::process::Command::new("explorer")
-        .arg(&folder)
-        .spawn()
-        .map_err(|e| e.to_string())?;
+    {
+        let mut cmd = std::process::Command::new("explorer");
+        cmd.arg(&folder);
+        cmd.spawn().map_err(|e| e.to_string())?;
+    }
 
     #[cfg(not(target_os = "windows"))]
     {
@@ -286,6 +283,9 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(AppState {
             jobs: Arc::new(Mutex::new(HashMap::new())),
         })
@@ -302,6 +302,17 @@ pub fn run() {
             resume_job,
             open_file,
             open_folder,
+            settings::load_settings,
+            settings::save_settings,
+            settings::update_setting,
+            settings::get_default_install_dir,
+            updater::check_for_updates,
+            updater::get_current_version,
+            updater::open_release_page,
+            updater::check_existing_installation,
+            updater::terminate_existing_instance,
+            notifications::send_completion_notification,
+            notifications::request_attention,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
