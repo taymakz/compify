@@ -14,18 +14,49 @@ import { PresetSelector } from '@/features/compression/components/PresetSelector
 import { CustomSettings } from '@/features/compression/components/CustomSettings';
 import { FormatConverter } from '@/features/compression/components/FormatConverter';
 import { SetupWizard, SETUP_DONE_KEY } from '@/features/compression/components/SetupWizard';
+import { SettingsDialog, THEME_KEY, type Theme } from '@/features/compression/components/SettingsDialog';
+import { UpdateBanner } from '@/features/compression/components/UpdateBanner';
+
+function getSystemDark() {
+  return window.matchMedia('(prefers-color-scheme: dark)').matches;
+}
+
+function resolveIsDark(theme: Theme): boolean {
+  if (theme === 'dark') return true;
+  if (theme === 'light') return false;
+  return getSystemDark();
+}
 
 export default function App() {
-  const [dark, setDark] = useState(true);
+  const [theme, setTheme] = useState<Theme>(() => {
+    return (localStorage.getItem(THEME_KEY) as Theme) || 'dark';
+  });
+  const [isDark, setIsDark] = useState(() => resolveIsDark((localStorage.getItem(THEME_KEY) as Theme) || 'dark'));
   const [setupDone, setSetupDone] = useState(() => !!localStorage.getItem(SETUP_DONE_KEY));
 
+  // Apply dark class to documentElement
   useEffect(() => {
-    document.documentElement.classList.toggle('dark', dark);
-  }, [dark]);
+    document.documentElement.classList.toggle('dark', isDark);
+  }, [isDark]);
+
+  // Listen for system theme changes when using system theme
+  useEffect(() => {
+    if (theme !== 'system') return;
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const handler = () => setIsDark(mq.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, [theme]);
+
+  const handleThemeChange = (t: Theme) => {
+    localStorage.setItem(THEME_KEY, t);
+    setTheme(t);
+    setIsDark(resolveIsDark(t));
+  };
 
   return (
     <CompressionProvider>
-      <div className={dark ? 'dark' : ''}>
+      <div className={isDark ? 'dark' : ''}>
         <AnimatePresence mode="wait">
           {!setupDone ? (
             <motion.div
@@ -42,7 +73,7 @@ export default function App() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
             >
-              <AppShell dark={dark} toggleDark={() => setDark((d) => !d)} />
+              <AppShell theme={theme} onThemeChange={handleThemeChange} />
             </motion.div>
           )}
         </AnimatePresence>
@@ -51,14 +82,15 @@ export default function App() {
   );
 }
 
-function AppShell({ dark, toggleDark }: { dark: boolean; toggleDark: () => void }) {
+function AppShell({ theme, onThemeChange }: { theme: Theme; onThemeChange: (t: Theme) => void }) {
   const { ffmpegStatus, isInstalling } = useFFmpegSetup();
   const loading = ffmpegStatus === null;
   const needsInstall = !loading && (!ffmpegStatus.installed || isInstalling);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   return (
     <div className="flex h-screen flex-col bg-background text-foreground antialiased">
-      <Header dark={dark} toggleDark={toggleDark} ffmpegVersion={ffmpegStatus?.version} />
+      <Header ffmpegVersion={ffmpegStatus?.version} onOpenSettings={() => setSettingsOpen(true)} />
 
       <AnimatePresence mode="wait">
         {loading ? (
@@ -95,40 +127,41 @@ function AppShell({ dark, toggleDark }: { dark: boolean; toggleDark: () => void 
           </motion.div>
         )}
       </AnimatePresence>
+
+      <SettingsDialog
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
+        theme={theme}
+        onThemeChange={onThemeChange}
+      />
     </div>
   );
 }
 
-function Header({
-  dark,
-  toggleDark,
-  ffmpegVersion,
-}: {
-  dark: boolean;
-  toggleDark: () => void;
+function Header({ ffmpegVersion, onOpenSettings }: {
   ffmpegVersion?: string | null;
+  onOpenSettings: () => void;
 }) {
   return (
-    <header className="flex h-12 shrink-0 items-center justify-between border-b bg-background/80 px-5 backdrop-blur">
-      <div className="flex items-center gap-2.5">
-        <img src={logoSrc} alt="Compify" className="size-7 rounded-lg object-contain" />
-        <span className="text-sm font-bold tracking-tight">Compify</span>
-        <Badge variant="secondary" className="text-[10px]">v0.1</Badge>
-        {ffmpegVersion && (
-          <Badge variant="outline" className="text-[10px] text-muted-foreground">
-            FFmpeg {ffmpegVersion}
-          </Badge>
-        )}
-      </div>
+    <>
+      <UpdateBanner />
+      <header className="flex h-12 shrink-0 items-center justify-between border-b bg-background/80 px-5 backdrop-blur">
+        <div className="flex items-center gap-2.5">
+          <img src={logoSrc} alt="Compify" className="size-7 rounded-lg object-contain" />
+          <span className="text-sm font-bold tracking-tight">Compify</span>
+          <Badge variant="secondary" className="text-[10px]">v1.0</Badge>
+          {ffmpegVersion && (
+            <Badge variant="outline" className="text-[10px] text-muted-foreground">
+              FFmpeg {ffmpegVersion}
+            </Badge>
+          )}
+        </div>
 
-      <Button size="icon-sm" variant="ghost" onClick={toggleDark} title="Toggle theme">
-        {dark ? (
-          <span className="icon-[material-symbols--light-mode] size-4" />
-        ) : (
-          <span className="icon-[material-symbols--dark-mode] size-4" />
-        )}
-      </Button>
-    </header>
+        <Button size="icon-sm" variant="ghost" onClick={onOpenSettings} title="Settings">
+          <span className="icon-[lucide--settings] size-4" />
+        </Button>
+      </header>
+    </>
   );
 }
 
