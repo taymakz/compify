@@ -48,7 +48,7 @@ async fn get_video_info(app: tauri::AppHandle, path: String) -> Result<VideoInfo
     let mut ffprobe_cmd = tokio::process::Command::new(&ffprobe);
     ffprobe_cmd.args(["-v", "quiet", "-print_format", "json", "-show_format", "-show_streams", &path]);
     #[cfg(windows)]
-    { use std::os::windows::process::CommandExt; ffprobe_cmd.creation_flags(0x08000000); }
+    ffprobe_cmd.creation_flags(0x08000000);
     let out = ffprobe_cmd.output().await.map_err(|e| e.to_string())?;
 
     let json: serde_json::Value =
