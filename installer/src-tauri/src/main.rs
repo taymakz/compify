@@ -35,6 +35,11 @@ struct InstallOptions {
 // ── Commands ──────────────────────────────────────────────────────────────────
 
 #[tauri::command]
+fn get_app_version() -> &'static str {
+    APP_VERSION
+}
+
+#[tauri::command]
 fn get_default_install_dir() -> String {
     let base = std::env::var("LOCALAPPDATA").unwrap_or_else(|_| {
         std::env::var("USERPROFILE").unwrap_or_else(|_| "C:\\Users\\User".into())
@@ -196,6 +201,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
+            get_app_version,
             get_default_install_dir,
             check_existing_installation,
             install_app,
