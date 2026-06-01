@@ -9,6 +9,13 @@
     "beforeBuildCommand": "pnpm build",
     "frontendDist": "../dist"
   },
+  "plugins": {
+    "updater": {
+      "active": true,
+      "endpoints": ["https://api.github.com/repos/taymakz/compify/releases/latest"],
+      "pubkey": ""
+    }
+  },
   "app": {
     "windows": [
       {
