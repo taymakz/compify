@@ -142,6 +142,13 @@ function Header({ onOpenSettings }: {
   ffmpegVersion?: string | null;
   onOpenSettings: () => void;
 }) {
+  const [appVersion, setAppVersion] = useState('');
+  useEffect(() => {
+    import('@tauri-apps/api/app').then(({ getVersion }) =>
+      getVersion().then(setAppVersion).catch(() => {})
+    );
+  }, []);
+
   return (
     <>
       <UpdateBanner />
@@ -149,8 +156,7 @@ function Header({ onOpenSettings }: {
         <div className="flex items-center gap-2.5">
           <img src={logoSrc} alt="Compify" className="size-7 rounded-lg object-contain" />
           <span className="text-sm font-bold tracking-tight">Compify</span>
-          <Badge variant="secondary" className="text-[10px]">v0.1</Badge>
-
+          {appVersion && <Badge variant="secondary" className="text-[10px]">v{appVersion}</Badge>}
         </div>
 
         <Button size="icon-sm" variant="ghost" onClick={onOpenSettings} title="Settings">
