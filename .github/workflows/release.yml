@@ -1,0 +1,244 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version override (e.g. 0.2.0). Leave empty to read from Cargo.toml.'
+        required: false
+        type: string
+      draft:
+        description: 'Publish as draft release'
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: release
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_TARGET_DIR: ${{ github.workspace }}/target
+
+# ── Resolve version ─────────────────────────────────────────────────────────────
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: ver
+        shell: bash
+        run: |
+          INPUT="${{ inputs.version }}"
+          if [ -n "$INPUT" ]; then
+            echo "version=$INPUT" >> "$GITHUB_OUTPUT"
+          else
+            VER=$(grep -m1 '^version' src-tauri/Cargo.toml | sed 's/version = "\(.*\)"/\1/')
+            echo "version=$VER" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Verify version resolved
+        run: echo "Building Compify v${{ steps.ver.outputs.version }}"
+
+# ── Windows ──────────────────────────────────────────────────────────────────────
+  build-windows:
+    needs: prepare
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Install frontend deps
+        run: pnpm install
+
+      # Build main Compify app (no bundle — installer handles Windows packaging)
+      - name: Build main app
+        run: pnpm tauri build --no-bundle
+
+      # Inject main exe + logo into the installer source tree
+      - name: Prepare installer resources
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force "installer\src-tauri\resources" | Out-Null
+          New-Item -ItemType Directory -Force "installer\src\assets" | Out-Null
+          Copy-Item "$env:CARGO_TARGET_DIR\release\tauri-starter.exe" `
+            "installer\src-tauri\resources\Compify.exe" -Force
+          Copy-Item "src\assets\logo-128.png" `
+            "installer\src\assets\logo-128.png" -Force
+
+      - name: Install installer frontend deps
+        working-directory: installer
+        run: pnpm install
+
+      - name: Build installer app
+        working-directory: installer
+        run: pnpm tauri build --no-bundle
+
+      - name: Collect Windows artifacts
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          $v = "${{ needs.prepare.outputs.version }}"
+          # Installer
+          Copy-Item "$env:CARGO_TARGET_DIR\release\compify-installer.exe" `
+            "dist\Compify-$v-Setup-windows-x64.exe" -Force
+          # Portable (standalone exe, no install needed)
+          Copy-Item "$env:CARGO_TARGET_DIR\release\tauri-starter.exe" `
+            "dist\Compify-$v-portable-windows-x64.exe" -Force
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-windows
+          path: dist/
+
+# ── Linux ─────────────────────────────────────────────────────────────────────────
+  build-linux:
+    needs: prepare
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            build-essential \
+            curl wget file
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Install frontend deps
+        run: pnpm install
+
+      # One build produces the binary + all Linux bundles
+      - name: Build Linux (AppImage + deb + binary)
+        run: pnpm tauri build
+
+      - name: Collect Linux artifacts
+        run: |
+          mkdir -p dist
+          v="${{ needs.prepare.outputs.version }}"
+          # AppImage (self-contained, runs on any distro)
+          find "$CARGO_TARGET_DIR/release/bundle/appimage" -name "*.AppImage" \
+            -exec cp {} "dist/Compify-${v}-linux-x86_64.AppImage" \; 2>/dev/null || true
+          # Debian package
+          find "$CARGO_TARGET_DIR/release/bundle/deb" -name "*.deb" \
+            -exec cp {} "dist/Compify-${v}-linux-amd64.deb" \; 2>/dev/null || true
+          # Portable binary (no dependencies on packaging)
+          cp "$CARGO_TARGET_DIR/release/tauri-starter" "dist/Compify-${v}-portable-linux-x86_64"
+          chmod +x "dist/Compify-${v}-portable-linux-x86_64"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-linux
+          path: dist/
+
+# ── macOS ──────────────────────────────────────────────────────────────────────────
+  build-macos:
+    needs: prepare
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Install frontend deps
+        run: pnpm install
+
+      # Universal binary covers both Apple Silicon and Intel Macs
+      - name: Build macOS universal (dmg + app)
+        run: pnpm tauri build --target universal-apple-darwin
+
+      - name: Collect macOS artifacts
+        run: |
+          mkdir -p dist
+          v="${{ needs.prepare.outputs.version }}"
+          base="$CARGO_TARGET_DIR/universal-apple-darwin/release/bundle"
+          # DMG installer
+          find "$base/dmg" -name "*.dmg" \
+            -exec cp {} "dist/Compify-${v}-macos-universal.dmg" \; 2>/dev/null || true
+          # Portable: zip the .app bundle so it's drag-drop ready
+          find "$base/macos" -maxdepth 1 -name "*.app" -print0 \
+            | xargs -0 -I{} zip -r "dist/Compify-${v}-portable-macos-universal.zip" {}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-macos
+          path: dist/
+
+# ── GitHub Release ────────────────────────────────────────────────────────────────
+  release:
+    needs: [prepare, build-windows, build-linux, build-macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List release files
+        run: ls -lh artifacts/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.prepare.outputs.version }}
+          name: Compify v${{ needs.prepare.outputs.version }}
+          draft: ${{ inputs.draft }}
+          generate_release_notes: true
+          fail_on_unmatched_files: false
+          files: artifacts/**
