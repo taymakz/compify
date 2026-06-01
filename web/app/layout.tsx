@@ -34,7 +34,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: `${APP_NAME} — Free Open-Source Video Compressor`,
     description: APP_DESCRIPTION,
-    url: "https://compify.app",
+    url: "https://compify-tau.vercel.app",
     siteName: APP_NAME,
     type: "website",
     locale: "en_US",
@@ -45,7 +45,7 @@ export const metadata: Metadata = {
     description: APP_DESCRIPTION,
   },
   robots: { index: true, follow: true },
-  metadataBase: new URL("https://compify.app"),
+  metadataBase: new URL("https://compify-tau.vercel.app"),
 }
 
 export default function RootLayout({
