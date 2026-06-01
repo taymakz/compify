@@ -300,10 +300,7 @@ pub async fn run_compression(
         .stdin(std::process::Stdio::null());
 
     #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x08000000);
-    }
+    cmd.creation_flags(0x08000000);
 
     let mut child = cmd
         .spawn()
@@ -445,7 +442,7 @@ async fn get_total_frames(ffprobe: &str, input: &str) -> u64 {
     let mut cmd = tokio::process::Command::new(ffprobe);
     cmd.args(["-v", "quiet", "-select_streams", "v:0", "-count_packets", "-show_entries", "stream=nb_read_packets,r_frame_rate,duration", "-print_format", "json", input]);
     #[cfg(windows)]
-    { use std::os::windows::process::CommandExt; cmd.creation_flags(0x08000000); }
+    cmd.creation_flags(0x08000000);
     let out = cmd.output().await.ok();
 
     if let Some(out) = out {
