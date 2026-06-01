@@ -179,18 +179,10 @@ function WelcomeStep({ onNext }: { onNext: () => void }) {
     <>
       {/* Branding */}
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10, paddingBlock: 12 }}>
-        <div style={{
-          width: 68, height: 68, borderRadius: 18,
-          background: "linear-gradient(135deg, #27272a, #3f3f46)",
-          border: "1px solid var(--border)",
-          display: "flex", alignItems: "center", justifyContent: "center",
-          boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
-        }}>
-          <VideoIcon size={34} />
-        </div>
+        <img src={logoSrc} alt="Compify" style={{ width: 68, height: 68, borderRadius: 18, objectFit: "contain", boxShadow: "0 8px 32px rgba(0,0,0,0.4)" }} />
         <div style={{ textAlign: "center" }}>
           <h1 style={{ fontSize: 22, fontWeight: 700, letterSpacing: "-0.3px", color: "var(--text)" }}>Compify</h1>
-          <p style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 2 }}>Professional Video Compressor · v1.0</p>
+          <p style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 2 }}>Professional Video Compressor · v0.1</p>
         </div>
       </div>
 
@@ -299,8 +291,6 @@ function LocationStep({
           onChange={onDesktopShortcutChange}
           label="Create desktop shortcut"
         />
-        <CheckboxRow checked disabled label="Add to Start Menu" />
-        <CheckboxRow checked disabled label="Register with Windows (Add/Remove Programs)" />
       </div>
 
       {/* Existing installation warning */}
@@ -346,20 +336,13 @@ function InstallingStep({ progress, statusMsg }: { progress: number; statusMsg: 
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", gap: 0 }}>
       {/* Pulsing logo */}
-      <motion.div
+      <motion.img
+        src={logoSrc}
+        alt="Compify"
         animate={{ scale: [1, 1.06, 1], opacity: [1, 0.75, 1] }}
         transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut" }}
-        style={{
-          width: 72, height: 72, borderRadius: 20,
-          background: "linear-gradient(135deg, #27272a, #3f3f46)",
-          border: "1px solid var(--border)",
-          display: "flex", alignItems: "center", justifyContent: "center",
-          boxShadow: "0 0 40px rgba(99,102,241,0.18)",
-          marginBottom: 24,
-        }}
-      >
-        <VideoIcon size={36} />
-      </motion.div>
+        style={{ width: 72, height: 72, borderRadius: 20, objectFit: "contain", boxShadow: "0 0 40px rgba(99,102,241,0.18)", marginBottom: 24 }}
+      />
 
       <h2 style={{ fontSize: 17, fontWeight: 700, marginBottom: 6 }}>Installing Compify</h2>
       <p style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 28, minHeight: 20 }}>{statusMsg}</p>
@@ -382,25 +365,6 @@ function InstallingStep({ progress, statusMsg }: { progress: number; statusMsg: 
         </div>
       </div>
 
-      {/* Steps indicator */}
-      <div style={{ display: "flex", gap: 20, marginTop: 28, fontSize: 11, color: "var(--text-subtle)" }}>
-        {[
-          { label: "Copy files", pct: 20 },
-          { label: "Shortcuts",  pct: 60 },
-          { label: "Register",   pct: 80 },
-          { label: "Done",       pct: 100 },
-        ].map(s => (
-          <div key={s.label} style={{ display: "flex", alignItems: "center", gap: 4 }}>
-            <motion.div
-              animate={{ background: progress >= s.pct ? "var(--success)" : "var(--bg-input)" }}
-              style={{ width: 6, height: 6, borderRadius: 99, flexShrink: 0 }}
-            />
-            <span style={{ color: progress >= s.pct ? "var(--text-muted)" : "var(--text-subtle)" }}>
-              {s.label}
-            </span>
-          </div>
-        ))}
-      </div>
     </div>
   );
 }
