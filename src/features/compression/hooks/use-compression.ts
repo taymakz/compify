@@ -2,6 +2,7 @@ import { useCallback, useRef } from 'react';
 import { invoke, Channel, convertFileSrc } from '@tauri-apps/api/core';
 import { useStore } from '../store';
 import { type CompressionResult, type ProgressData, type VideoInfo } from '../types';
+import type { AppSettings } from '../types';
 import { OUTPUT_DIR_KEY } from '../components/SetupWizard';
 
 interface CompressionEventPayload {
@@ -175,11 +176,35 @@ export function useCompression() {
   const compressAll = useCallback(async () => {
     if (processingRef.current) return;
     processingRef.current = true;
+    
     const pending = state.files.filter((f) => f.status === 'pending');
+    const totalFiles = pending.length;
+    
     for (const file of pending) {
       await compressFile(file.id);
     }
+    
     processingRef.current = false;
+    
+    // Send notification when all jobs complete
+    if (totalFiles > 0) {
+      try {
+        const settings = await invoke<AppSettings>('load_settings');
+        if (settings.notifications_enabled) {
+          const completed = state.files.filter((f) => f.status === 'completed').length;
+          const failed = state.files.filter((f) => f.status === 'error').length;
+          
+          await invoke('send_completion_notification', {
+            title: 'Compression Complete',
+            body: `${completed} file${completed !== 1 ? 's' : ''} compressed successfully${failed > 0 ? `, ${failed} failed` : ''}`,
+          });
+          
+          await invoke('request_attention');
+        }
+      } catch (error) {
+        console.error('Failed to send notification:', error);
+      }
+    }
   }, [state.files, compressFile]);
 
   const pauseJob = useCallback(async () => {
