@@ -3,8 +3,14 @@ import { motion } from 'motion/react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/button';
 import { Badge } from '@/components/badge';
+import { Tooltip, TooltipTrigger, TooltipPopup } from '@/components/tooltip';
 import { formatBytes, formatDuration, formatEta, type FileItem } from '../types';
 import { useCompression } from '../hooks/use-compression';
+
+function truncateName(name: string): string {
+  if (name.length <= 100) return name;
+  return `${name.slice(0, 80)}…${name.slice(-20)}`;
+}
 
 const STATUS_BADGE: Record<
   FileItem['status'],
@@ -48,10 +54,20 @@ export function FileCard({ file, isActive, onCompress, onPlay }: Props) {
         <Thumbnail file={file} onPlay={onPlay} />
 
         <div className="flex min-w-0 flex-1 flex-col gap-1">
-          <div className="flex items-start gap-6">
-            <p className="truncate text-sm font-medium leading-tight">{file.name}</p>
+          <div className="flex items-start gap-2">
+            <Tooltip>
+              <TooltipTrigger
+                render={<span />}
+                className="min-w-0 flex-1 max-w-50 truncate text-sm font-medium leading-tight cursor-default"
+              >
+                {truncateName(file.name)}
+              </TooltipTrigger>
+              <TooltipPopup side="top" className="max-w-xs break-all px-2.5 py-1.5">
+                {file.name}
+              </TooltipPopup>
+            </Tooltip>
             <Badge variant={badge.variant} className="shrink-0 text-[10px]">
-              {badge.label} 
+              {badge.label}
             </Badge>
           </div>
 
