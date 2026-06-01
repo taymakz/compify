@@ -2,7 +2,7 @@ import { cn } from '@/lib/utils';
 import { useSettings } from '../store';
 import { FORMAT_LABELS, type VideoFormat } from '../types';
 
-const FORMAT_COMPAT: Record<VideoFormat, string> = {
+const FORMAT_COMPAT: Record<string, string> = {
   mp4: 'Universal. Best for sharing and web.',
   mkv: 'Open standard. Supports any codec + subtitles.',
   mov: 'Apple ecosystem. High quality.',
