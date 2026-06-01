@@ -60,12 +60,7 @@ export function PresetSelector() {
               layout
               type="button"
               onClick={() => setPreset(p.id)}
-              className={cn(
-                'relative group flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition-all duration-150 overflow-hidden',
-                active
-                  ? 'border-primary bg-primary/8 text-primary shadow-sm'
-                  : 'border-border bg-card text-foreground hover:border-border/80 hover:bg-muted/50',
-              )}
+              className="relative group flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition-all duration-150 overflow-hidden"
             >
               {/* active indicator bar */}
               {active && (
