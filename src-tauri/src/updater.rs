@@ -132,13 +132,12 @@ fn get_installed_version(_exe_path: &std::path::Path) -> Option<String> {
 fn is_process_running(process_name: &str) -> bool {
     use std::process::Command;
 
-    let output = Command::new("tasklist")
-        .args(["/FI", &format!("IMAGENAME eq {}", process_name)])
-        .output();
-
-    if let Ok(output) = output {
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        stdout.contains(process_name)
+    let mut cmd = Command::new("tasklist");
+    cmd.args(["/FI", &format!("IMAGENAME eq {}", process_name)]);
+    use std::os::windows::process::CommandExt;
+    cmd.creation_flags(0x08000000);
+    if let Ok(output) = cmd.output() {
+        String::from_utf8_lossy(&output.stdout).contains(process_name)
     } else {
         false
     }
@@ -149,10 +148,11 @@ fn is_process_running(process_name: &str) -> bool {
 pub fn terminate_existing_instance() -> Result<(), String> {
     use std::process::Command;
 
-    Command::new("taskkill")
-        .args(["/F", "/IM", "Compify.exe"])
-        .output()
-        .map_err(|e| e.to_string())?;
+    use std::os::windows::process::CommandExt;
+    let mut cmd = Command::new("taskkill");
+    cmd.args(["/F", "/IM", "Compify.exe"]);
+    cmd.creation_flags(0x08000000);
+    cmd.output().map_err(|e| e.to_string())?;
 
     std::thread::sleep(std::time::Duration::from_secs(1));
     Ok(())
