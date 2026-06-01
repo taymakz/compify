@@ -266,11 +266,13 @@ export function Hero() {
               <div className="size-3 rounded-full bg-green-500/60" />
               <span className="ml-3 text-[11px] text-white/20">Compify</span>
             </div>
-            <img
-              src="/app.gif"
-              alt="Compify video compression app in action — drag, drop, compress"
+            <video
+              src="/app.mp4"
+              autoPlay
+              loop
+              muted
+              playsInline
               className="w-full"
-              loading="eager"
             />
           </div>
         </motion.div>

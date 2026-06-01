@@ -4,7 +4,7 @@
 
 Built with [Tauri v2](https://tauri.app), React 19, and Rust — smart presets, GPU acceleration, batch processing, and zero uploads. Your videos never leave your machine.
 
-![Compify in action](web/public/app.gif)
+![Compify in action](web/public/app.mp4)
 
 ---
 
