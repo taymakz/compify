@@ -46,12 +46,22 @@ if (-not (Test-Path $MainExe)) { Die "Main exe not found at: $MainExe" }
 $MainSizeMB = [math]::Round((Get-Item $MainExe).Length / 1MB, 1)
 OK "Main app built — $MainSizeMB MB"
 
-# ── Step 2: Copy exe into installer resources ─────────────────────────────────
+# ── Step 2: Copy exe and assets into installer ────────────────────────────────
 Step "[2/3] Embedding main app into installer..."
 $InstallerRes = Join-Path $Root "installer\src-tauri\resources"
 New-Item -ItemType Directory -Force $InstallerRes | Out-Null
 Copy-Item $MainExe (Join-Path $InstallerRes "Compify.exe") -Force
 OK "Copied Compify.exe -> installer/src-tauri/resources/"
+
+$InstallerAssets = Join-Path $Root "installer\src\assets"
+New-Item -ItemType Directory -Force $InstallerAssets | Out-Null
+$LogoSrc = Join-Path $Root "src\assets\logo-128.png"
+if (Test-Path $LogoSrc) {
+    Copy-Item $LogoSrc (Join-Path $InstallerAssets "logo-128.png") -Force
+    OK "Copied logo-128.png -> installer/src/assets/"
+} else {
+    Write-Host "  WARN  logo-128.png not found, logo will be missing in installer" -ForegroundColor Yellow
+}
 
 # ── Step 3: Build installer app ───────────────────────────────────────────────
 Step "[3/3] Building installer app..."
