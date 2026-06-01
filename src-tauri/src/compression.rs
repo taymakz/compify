@@ -7,28 +7,38 @@ use tauri::ipc::Channel;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 
-/// تست سریع انکودر سخت‌افزاری
 fn test_encoder_sync(ffmpeg_path: &str, encoder: &str) -> bool {
-    let result = std::process::Command::new(ffmpeg_path)
-        .args([
-            "-f",
-            "lavfi",
-            "-i",
-            "color=c=black:s=192x108:d=0.1",
-            "-c:v",
-            encoder,
-            "-t",
-            "0.1",
-            "-f",
-            "null",
-            "-",
-        ])
-        .output();
-
-    match result {
+    let mut cmd = std::process::Command::new(ffmpeg_path);
+    cmd.args(["-f", "lavfi", "-i", "color=c=black:s=192x108:d=0.1", "-c:v", encoder, "-t", "0.1", "-f", "null", "-"]);
+    #[cfg(windows)]
+    { use std::os::windows::process::CommandExt; cmd.creation_flags(0x08000000); }
+    match cmd.output() {
         Ok(output) => output.status.success(),
         Err(_) => false,
     }
+}
+
+/// Returns the first encoder that actually works on this FFmpeg binary.
+/// For WebM only AV1/VP9 codecs are tried; for everything else H.264 family first.
+fn resolve_fallback_codec(ffmpeg_path: &str, output_format: &str) -> String {
+    let candidates: &[&str] = if output_format == "webm" {
+        &["libsvtav1", "libaom-av1", "libvpx-vp9"]
+    } else {
+        &[
+            "libx264", "libx265",
+            "h264_nvenc", "h264_amf", "h264_qsv",
+            "hevc_nvenc", "hevc_amf", "hevc_qsv",
+            "mpeg4",
+        ]
+    };
+    for &codec in candidates {
+        if test_encoder_sync(ffmpeg_path, codec) {
+            println!("[Compify] Resolved fallback encoder: {}", codec);
+            return codec.to_string();
+        }
+    }
+    println!("[Compify] No encoder available, using stream copy");
+    "copy".to_string()
 }
 
 #[allow(dead_code)]
@@ -57,20 +67,21 @@ pub async fn run_compression(
     // ====================== Fallback انکودر ویدیو ======================
     if matches!(
         settings.video_codec.as_str(),
-        "h264_nvenc" | "h264_amf" | "h264_qsv"
+        "h264_nvenc" | "h264_amf" | "h264_qsv" | "hevc_nvenc" | "hevc_amf" | "hevc_qsv"
     ) {
         if !test_encoder_sync(&ffmpeg_path, &settings.video_codec) {
             println!(
-                "[Compify] Hardware encoder '{}' unavailable → falling back to libx264",
+                "[Compify] Hardware encoder '{}' unavailable, finding software fallback",
                 settings.video_codec
             );
-            settings.video_codec = "libx264".to_string();
+            settings.video_codec = resolve_fallback_codec(&ffmpeg_path, &settings.output_format);
             settings.preset_speed = "medium".to_string();
         }
     }
 
     // ====================== تنظیمات سازگار با WebM ======================
     let is_webm = settings.output_format == "webm";
+    let _is_mkv = settings.output_format == "mkv";
 
     if is_webm {
         // WebM فقط AV1/VP9 + Opus پشتیبانی می‌کند
@@ -78,13 +89,38 @@ pub async fn run_compression(
             settings.video_codec.as_str(),
             "libsvtav1" | "libvpx-vp9" | "libaom-av1"
         ) {
-            settings.video_codec = "libsvtav1".to_string();
+            let codec = resolve_fallback_codec(&ffmpeg_path, "webm");
+            println!("[Compify] WebM output → switching to {}", codec);
+            settings.video_codec = codec;
         }
         if !matches!(settings.audio_codec.as_str(), "libopus" | "copy") {
             println!("[Compify] WebM output → forcing libopus audio codec");
             settings.audio_codec = "libopus".to_string();
             settings.audio_bitrate = 128; // مناسب برای Opus
         }
+    } else if matches!(settings.output_format.as_str(), "mp4" | "m4v" | "mov") {
+        // MP4/M4V/MOV cannot contain VP9 or AV1 reliably
+        if matches!(
+            settings.video_codec.as_str(),
+            "libvpx-vp9" | "libsvtav1" | "libaom-av1"
+        ) {
+            println!(
+                "[Compify] {} output incompatible with {}, finding compatible encoder",
+                settings.output_format, settings.video_codec
+            );
+            settings.video_codec = resolve_fallback_codec(&ffmpeg_path, &settings.output_format);
+            settings.preset_speed = "medium".to_string();
+        }
+    }
+
+    // Final safety net: verify the resolved codec actually works before spawning FFmpeg
+    if settings.video_codec != "copy" && !test_encoder_sync(&ffmpeg_path, &settings.video_codec) {
+        println!(
+            "[Compify] Codec '{}' still unavailable after resolution, re-resolving",
+            settings.video_codec
+        );
+        settings.video_codec = resolve_fallback_codec(&ffmpeg_path, &settings.output_format);
+        settings.preset_speed = "medium".to_string();
     }
 
     let mut args: Vec<String> = vec!["-y".into(), "-i".into(), input_path.clone()];
@@ -95,7 +131,7 @@ pub async fn run_compression(
     args.extend(["-c:v".into(), settings.video_codec.clone()]);
 
     match settings.video_codec.as_str() {
-        "copy" => {}
+        "copy" => {},
 
         "libvpx-vp9" => {
             let cpu_used = match settings.preset_speed.as_str() {
@@ -123,6 +159,7 @@ pub async fn run_compression(
                 "fast" => "8",
                 "slow" => "4",
                 "slower" | "veryslow" => "2",
+                "placebo" => "0",
                 _ => "6",
             };
             args.extend([
@@ -133,7 +170,67 @@ pub async fn run_compression(
             ]);
         }
 
-        _ => {
+        "libx265" => {
+            args.extend([
+                "-crf".into(),
+                settings.crf.to_string(),
+                "-preset".into(),
+                settings.preset_speed.clone(),
+                "-pix_fmt".into(),
+                "yuv420p".into(),
+                "-tag:v".into(),
+                "hvc1".into(), // Better compatibility
+            ]);
+        }
+
+        "h264_nvenc" | "hevc_nvenc" => {
+            // NVENC uses p1 (fastest) – p7 (slowest/best) presets
+            let preset = match settings.preset_speed.as_str() {
+                "ultrafast" | "superfast" => "p1",
+                "veryfast" | "faster"     => "p2",
+                "fast"                    => "p3",
+                "slow"                    => "p5",
+                "slower"                  => "p6",
+                "veryslow" | "placebo"    => "p7",
+                _                         => "p4",
+            };
+            args.extend([
+                "-cq".into(),
+                settings.crf.to_string(),
+                "-preset".into(),
+                preset.into(),
+            ]);
+        }
+
+        "h264_amf" | "hevc_amf" => {
+            // AMF has no x264-style presets; use -quality and CQP mode
+            let quality = match settings.preset_speed.as_str() {
+                "ultrafast" | "superfast" | "veryfast" | "faster" | "fast" => "speed",
+                "slow" | "slower" | "veryslow" | "placebo" => "quality",
+                _ => "balanced",
+            };
+            args.extend([
+                "-rc_mode".into(), "cqp".into(),
+                "-qp_i".into(),    settings.crf.to_string(),
+                "-qp_p".into(),    settings.crf.to_string(),
+                "-quality".into(), quality.into(),
+            ]);
+        }
+
+        "h264_qsv" | "hevc_qsv" => {
+            // QSV: global_quality for CRF-like control; preset names are x264-compatible
+            let preset = match settings.preset_speed.as_str() {
+                "ultrafast" | "superfast" => "veryfast",
+                "placebo"                 => "veryslow",
+                other                     => other,
+            };
+            args.extend([
+                "-global_quality".into(), settings.crf.to_string(),
+                "-preset".into(),         preset.into(),
+            ]);
+        }
+
+        _ => { // libx264 and any other encoder that speaks x264 preset names
             args.extend([
                 "-crf".into(),
                 settings.crf.to_string(),
@@ -146,7 +243,7 @@ pub async fn run_compression(
     }
 
     // Filter Chain
-    if settings.video_codec != "copy" {
+    if settings.video_codec != "copy" && settings.resolution.is_some() {
         let vf = if let Some(ref res) = settings.resolution {
             format!(
                 "scale={}:force_original_aspect_ratio=decrease,scale=trunc(iw/2)*2:trunc(ih/2)*2",
@@ -156,6 +253,12 @@ pub async fn run_compression(
             "scale=trunc(iw/2)*2:trunc(ih/2)*2".to_string()
         };
         args.extend(["-vf".into(), vf]);
+    } else if settings.video_codec != "copy" {
+        // Ensure even dimensions even without resolution change
+        args.extend([
+            "-vf".into(),
+            "scale=trunc(iw/2)*2:trunc(ih/2)*2".into(),
+        ]);
     }
 
     if let Some(fps) = settings.fps {
@@ -339,22 +442,11 @@ pub async fn run_compression(
 }
 // Helper Functions
 async fn get_total_frames(ffprobe: &str, input: &str) -> u64 {
-    let out = tokio::process::Command::new(ffprobe)
-        .args([
-            "-v",
-            "quiet",
-            "-select_streams",
-            "v:0",
-            "-count_packets",
-            "-show_entries",
-            "stream=nb_read_packets,r_frame_rate,duration",
-            "-print_format",
-            "json",
-            input,
-        ])
-        .output()
-        .await
-        .ok();
+    let mut cmd = tokio::process::Command::new(ffprobe);
+    cmd.args(["-v", "quiet", "-select_streams", "v:0", "-count_packets", "-show_entries", "stream=nb_read_packets,r_frame_rate,duration", "-print_format", "json", input]);
+    #[cfg(windows)]
+    { use std::os::windows::process::CommandExt; cmd.creation_flags(0x08000000); }
+    let out = cmd.output().await.ok();
 
     if let Some(out) = out {
         if let Ok(json) = serde_json::from_slice::<serde_json::Value>(&out.stdout) {
