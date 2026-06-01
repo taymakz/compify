@@ -12,7 +12,9 @@
   "plugins": {
     "updater": {
       "active": true,
-      "endpoints": ["https://api.github.com/repos/taymakz/compify/releases/latest"],
+      "endpoints": [
+        "https://api.github.com/repos/taymakz/compify/releases/latest"
+      ],
       "pubkey": ""
     }
   },
@@ -32,7 +34,9 @@
       "csp": null,
       "assetProtocol": {
         "enable": true,
-        "scope": ["**"]
+        "scope": [
+          "**"
+        ]
       }
     }
   },
